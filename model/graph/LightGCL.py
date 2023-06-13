@@ -8,19 +8,15 @@ from base.torch_interface import TorchGraphInterface
 from util.loss_torch import bpr_loss, l2_reg_loss, InfoNCE
 
 
-# Paper: XSimGCL - Towards Extremely Simple Graph Contrastive Learning for Recommendation
-
-
-class XSimGCL(GraphRecommender):
+class LightGCL(GraphRecommender):
     def __init__(self, conf, training_set, test_set):
-        super(XSimGCL, self).__init__(conf, training_set, test_set)
-        args = OptionConf(self.config['XSimGCL'])
+        super(LightGCL, self).__init__(conf, training_set, test_set)
+        args = OptionConf(self.config['LightGCL'])
         self.cl_rate = float(args['-lambda'])
         self.eps = float(args['-eps'])
-        self.temp = float(args['-tau'])
+        self.temp = float(args['-temp'])
         self.n_layers = int(args['-n_layer'])
-        self.layer_cl = int(args['-l*'])
-        self.model = XSimGCL_Encoder(self.data, self.emb_size, self.eps, self.n_layers, self.layer_cl)
+        self.model = LightGCL_Encoder(self.data, self.emb_size, self.eps, self.n_layers)
 
     def train(self):
         model = self.model.cuda()
@@ -63,14 +59,13 @@ class XSimGCL(GraphRecommender):
         return score.cpu().numpy()
 
 
-class XSimGCL_Encoder(nn.Module):
-    def __init__(self, data, emb_size, eps, n_layers, layer_cl):
-        super(XSimGCL_Encoder, self).__init__()
+class LightGCL_Encoder(nn.Module):
+    def __init__(self, data, emb_size, eps, n_layers):
+        super(LightGCL_Encoder, self).__init__()
         self.data = data
         self.eps = eps
         self.emb_size = emb_size
         self.n_layers = n_layers
-        self.layer_cl = layer_cl
         self.norm_adj = data.norm_adj
         self.embedding_dict = self._init_model()
         self.sparse_norm_adj = TorchGraphInterface.convert_sparse_mat_to_tensor(self.norm_adj).cuda()
@@ -86,14 +81,13 @@ class XSimGCL_Encoder(nn.Module):
     def forward(self, perturbed=False):
         ego_embeddings = torch.cat([self.embedding_dict['user_emb'], self.embedding_dict['item_emb']], 0)
         all_embeddings = []
-        # all_embeddings_cl = ego_embeddings
         for k in range(self.n_layers):
             ego_embeddings = torch.sparse.mm(self.sparse_norm_adj, ego_embeddings)
             if perturbed:
                 random_noise = torch.rand_like(ego_embeddings).cuda()
                 ego_embeddings += torch.sign(ego_embeddings) * F.normalize(random_noise, dim=-1) * self.eps
             all_embeddings.append(ego_embeddings)
-            if k == self.layer_cl - 1:
+            if k == self.n_layers - 1:
                 all_embeddings_cl = ego_embeddings
         final_embeddings = torch.stack(all_embeddings, dim=1)
         final_embeddings = torch.mean(final_embeddings, dim=1)
